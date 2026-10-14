@@ -5,11 +5,11 @@ local L = addon.L
 local _G = _G
 local BACKPACK_CONTAINER = _G.BACKPACK_CONTAINER
 local band = _G.bit.band
-local BankFrame = _G.BankFrame
 local BANK_BAG = _G.BANK_BAG
 local BANK_BAG_PURCHASE = _G.BANK_BAG_PURCHASE
 local BANK_CONTAINER = _G.BANK_CONTAINER
 local ClearCursor = _G.ClearCursor
+local CONFIRM_BUY_BANK_SLOT = _G.CONFIRM_BUY_BANK_SLOT
 local ContainerIDToInventoryID = _G.ContainerIDToInventoryID
 local COSTS_LABEL = _G.COSTS_LABEL
 local CreateFrame = _G.CreateFrame
@@ -30,7 +30,9 @@ local ipairs = _G.ipairs
 local InCombatLockdown = _G.InCombatLockdown
 local IsInventoryItemLocked = _G.IsInventoryItemLocked
 local KEYRING_CONTAINER = _G.KEYRING_CONTAINER
+local MoneyFrame_Update = _G.MoneyFrame_Update
 local next = _G.next
+local NO = _G.NO
 local NUM_BAG_SLOTS = _G.NUM_BAG_SLOTS
 local NUM_BANKGENERIC_SLOTS = _G.NUM_BANKGENERIC_SLOTS
 local pairs = _G.pairs
@@ -38,17 +40,20 @@ local pcall = _G.pcall
 local PickupBagFromSlot = _G.PickupBagFromSlot
 local PickupContainerItem = _G.PickupContainerItem
 local PlaySound = _G.PlaySound
+local PurchaseSlot = _G.PurchaseSlot
 local PutItemInBag = _G.PutItemInBag
 local select = _G.select
 local SetItemButtonDesaturated = _G.SetItemButtonDesaturated
 local SetItemButtonTexture = _G.SetItemButtonTexture
 local SetItemButtonTextureVertexColor = _G.SetItemButtonTextureVertexColor
 local StaticPopup_Show = _G.StaticPopup_Show
+local StaticPopupDialogs = _G.StaticPopupDialogs
 local strjoin = _G.strjoin
 local tinsert = _G.tinsert
 local tsort = _G.table.sort
 local unpack = _G.unpack
 local wipe = _G.wipe
+local YES = _G.YES
 --GLOBALS>
 
 local ITEM_SIZE = addon.ITEM_SIZE
@@ -370,10 +375,25 @@ end
 
 local bankButtonClass, bankButtonProto = addon:NewClass("BankSlotButton", "BagSlotButton")
 
+StaticPopupDialogs["ADIBAGS_CONFIRM_BUY_BANK_SLOT"] = {
+	text = CONFIRM_BUY_BANK_SLOT,
+	button1 = YES,
+	button2 = NO,
+	OnAccept = function()
+		PurchaseSlot()
+	end,
+	OnShow = function(self, cost)
+		MoneyFrame_Update(self.moneyFrame, cost)
+	end,
+	hasMoneyFrame = 1,
+	timeout = 0,
+	hideOnEscape = 1,
+}
+
 function bankButtonProto:OnClick(button)
 	if self.toPurchase then
 		PlaySound("igMainMenuOption")
-		StaticPopup_Show("CONFIRM_BUY_BANK_SLOT")
+		StaticPopup_Show("ADIBAGS_CONFIRM_BUY_BANK_SLOT", nil, nil, self.slotCost)
 	else
 		return bagButtonProto.OnClick(self, button)
 	end
@@ -390,7 +410,7 @@ function bankButtonProto:UpdateStatus()
 		SetItemButtonTextureVertexColor(self, 1, 0.1, 0.1)
 		local cost = GetBankSlotCost(bankSlot)
 		if bankSlot == numSlots + 1 then
-			BankFrame.nextSlotCost = cost
+			self.slotCost = cost
 			self.tooltipText = strjoin(
 				"",
 				BANK_BAG_PURCHASE,

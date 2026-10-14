@@ -10,10 +10,8 @@ local BANK_CONTAINER = _G.BANK_CONTAINER
 local KEYRING_CONTAINER = _G.KEYRING_CONTAINER
 local REAGENTBANK_CONTAINER = _G.REAGENTBANK_CONTAINER
 local CloseBankFrame = _G.CloseBankFrame
-local ContainerFrame_GenerateFrame = _G.ContainerFrame_GenerateFrame
-local ContainerFrame_GetOpenFrame = _G.ContainerFrame_GetOpenFrame
-local GetContainerNumSlots = _G.GetContainerNumSlots
 local geterrorhandler = _G.geterrorhandler
+local hooksecurefunc = _G.hooksecurefunc
 local ipairs = _G.ipairs
 local next = _G.next
 local NUM_BAG_SLOTS = _G.NUM_BAG_SLOTS
@@ -28,6 +26,7 @@ local tinsert = _G.tinsert
 local tsort = _G.table.sort
 local type = _G.type
 local UIParent = _G.UIParent
+local UISpecialFrames = _G.UISpecialFrames
 local wipe = _G.wipe
 --GLOBALS>
 
@@ -314,14 +313,6 @@ function addon:OnEnable()
 	self:RegisterMessage("AdiBags_BagOpened", "LayoutBags")
 	self:RegisterMessage("AdiBags_BagClosed", "LayoutBags")
 
-	self:RawHook("OpenAllBags", true)
-	self:RawHook("CloseAllBags", true)
-	self:RawHook("ToggleBackpack", true)
-	self:RawHook("ToggleBag", true)
-	self:RawHook("OpenBackpack", true)
-	self:RawHook("CloseBackpack", true)
-	self:RawHook("CloseSpecialWindows", true)
-
 	-- Track most windows involving items
 	for _, event in ipairs({
 		"BANKFRAME_OPENED",
@@ -461,11 +452,6 @@ function addon:BankUpdated(slots)
 	end
 end
 
-function addon:CloseSpecialWindows()
-	local bagWasOpen = self:CloseAllBags()
-	return self.hooks.CloseSpecialWindows() or bagWasOpen
-end
-
 --[===[@debug@
 local function DebugTable(t, prevKey)
 	local k, v = next(t, prevKey)
@@ -551,47 +537,120 @@ end
 --------------------------------------------------------------------------------
 
 local hookedBags = {}
-local containersFrames = {}
-do
-	for i = 1, NUM_CONTAINER_FRAMES, 1 do
-		containersFrames[i] = _G["ContainerFrame" .. i]
+
+local hiddenParent = CreateFrame("Frame")
+hiddenParent:SetAllPoints(UIParent)
+hiddenParent:Hide()
+
+local blizzardBags = {}
+
+local function AddBlizzardBag(frame, isBank)
+	if frame then
+		tinsert(blizzardBags, { frame = frame, parent = frame:GetParent(), isBank = isBank })
 	end
 end
 
-local IterateBuiltInContainers
-do
-	local GetContainerNumSlots = GetContainerNumSlots
-	local function iter(maxContainer, id)
-		while id < maxContainer do
-			id = id + 1
-			if not hookedBags[id] and GetContainerNumSlots(id) > 0 then
-				return id
+for i = 1, NUM_CONTAINER_FRAMES do
+	local frame = _G["ContainerFrame" .. i]
+	AddBlizzardBag(frame, not not (frame and frame:GetAttribute("canUseForBankBag")))
+end
+AddBlizzardBag(_G.ContainerFrameCombinedBags, false)
+AddBlizzardBag(_G.ContainerFrameCombinedBank, true)
+
+local function SetBlizzardBagsHidden(isBank, hidden)
+	local wasOpen
+	for _, entry in ipairs(blizzardBags) do
+		if entry.isBank == isBank then
+			local frame = entry.frame
+			if hidden then
+				wasOpen = wasOpen or frame:IsVisible()
+				frame:Hide()
+				frame:SetParent(hiddenParent)
+			else
+				frame:SetParent(entry.parent)
 			end
 		end
 	end
+	return wasOpen
+end
 
-	function IterateBuiltInContainers()
-		if addon:GetInteractingWindow() == "BANKFRAME" then
-			return iter, NUM_BAG_SLOTS + NUM_BANKBAGSLOTS, -1
-		else
-			return iter, NUM_BAG_SLOTS, -1
+local function HideBlizzardBags()
+	local hidden
+	for _, entry in ipairs(blizzardBags) do
+		local frame = entry.frame
+		if frame:IsShown() and hookedBags[entry.isBank and BANK_CONTAINER or BACKPACK_CONTAINER] then
+			frame:Hide()
+			hidden = true
 		end
+	end
+	return hidden
+end
+
+local function HasOpenBag()
+	for _ in addon:IterateBags(true) do
+		return true
 	end
 end
 
-local function GetContainerFrame(id, spawn)
-	for _, frame in pairs(containersFrames) do
-		if frame:IsShown() and frame:GetID() == id then
-			return frame
-		end
+local pendingAction, pendingArg
+
+local actionFrame = CreateFrame("Frame")
+actionFrame:Hide()
+actionFrame:SetScript("OnUpdate", function(self)
+	self:Hide()
+	local action, arg = pendingAction, pendingArg
+	pendingAction, pendingArg = nil, nil
+	if action and addon:IsEnabled() then
+		addon[action](addon, arg)
 	end
-	if spawn then
-		local size = GetContainerNumSlots(id)
-		if size > 0 then
-			local frame = ContainerFrame_GetOpenFrame(id)
-			ContainerFrame_GenerateFrame(frame, size, id)
-		end
+end)
+
+local escapeFrame = CreateFrame("Frame", addonName .. "EscapeCatcher")
+escapeFrame:Hide()
+escapeFrame:SetScript("OnUpdate", escapeFrame.Hide)
+tinsert(UISpecialFrames, escapeFrame:GetName())
+
+local function QueueBagAction(action, arg)
+	if addon:IsEnabled() then
+		HideBlizzardBags()
+		pendingAction, pendingArg = action, arg
+		actionFrame:Show()
 	end
+end
+
+hooksecurefunc("OpenAllBags", function(forceOpen)
+	QueueBagAction("OpenAllBags", forceOpen)
+end)
+
+hooksecurefunc("CloseAllBags", function()
+	if addon:IsEnabled() and HasOpenBag() then
+		escapeFrame:Show()
+	end
+	QueueBagAction("CloseAllBags")
+end)
+
+hooksecurefunc("ToggleBackpack", function()
+	QueueBagAction("ToggleBackpack")
+end)
+
+hooksecurefunc("ToggleBag", function(id)
+	QueueBagAction("ToggleBag", id)
+end)
+
+hooksecurefunc("OpenBackpack", function()
+	QueueBagAction("OpenBackpack")
+end)
+
+hooksecurefunc("CloseBackpack", function()
+	QueueBagAction("CloseBackpack")
+end)
+
+if _G.OpenAllBagsMatchingContext then
+	hooksecurefunc("OpenAllBagsMatchingContext", function()
+		if HideBlizzardBags() then
+			QueueBagAction("OpenAllBags", true)
+		end
+	end)
 end
 
 function addon:OpenAllBags(forceOpen)
@@ -604,21 +663,12 @@ function addon:OpenAllBags(forceOpen)
 			end
 		end
 	end
-	for id in IterateBuiltInContainers() do
-		total = total + 1
-		if GetContainerFrame(id) then
-			open = open + 1
-		end
-	end
 	if open == total and not forceOpen then
 		return self:CloseAllBags()
 	end
 
 	for _, bag in self:IterateBags() do
 		bag:Open()
-	end
-	for id in IterateBuiltInContainers() do
-		GetContainerFrame(id, true)
 	end
 end
 
@@ -629,13 +679,6 @@ function addon:CloseAllBags()
 			closed = true
 		end
 	end
-	for id in IterateBuiltInContainers() do
-		local frame = GetContainerFrame(id)
-		if frame then
-			frame:Hide()
-			closed = true
-		end
-	end
 	return closed
 end
 
@@ -643,11 +686,6 @@ function addon:ToggleBag(id)
 	local ourBag = hookedBags[id]
 	if ourBag then
 		return ourBag:Toggle()
-	else
-		local frame = GetContainerFrame(id, true)
-		if frame then
-			frame:Hide()
-		end
 	end
 end
 
@@ -656,11 +694,7 @@ function addon:OpenBackpack()
 	if ourBackpack then
 		self.backpackWasOpen = ourBackpack:IsOpen()
 		ourBackpack:Open()
-	else
-		local frame = GetContainerFrame(BACKPACK_CONTAINER, true)
-		self.backpackWasOpen = not not frame
 	end
-	return self.backpackWasOpen
 end
 
 function addon:CloseBackpack()
@@ -670,11 +704,6 @@ function addon:CloseBackpack()
 	local ourBackpack = hookedBags[BACKPACK_CONTAINER]
 	if ourBackpack then
 		return ourBackpack:Close()
-	else
-		local frame = GetContainerFrame(BACKPACK_CONTAINER)
-		if frame then
-			frame:Hide()
-		end
 	end
 end
 
@@ -682,12 +711,6 @@ function addon:ToggleBackpack()
 	local ourBackpack = hookedBags[BACKPACK_CONTAINER]
 	if ourBackpack then
 		return ourBackpack:Toggle()
-	end
-	local frame = GetContainerFrame(BACKPACK_CONTAINER)
-	if frame then
-		self:CloseAllBags()
-	else
-		self:OpenBackpack()
 	end
 end
 
@@ -727,15 +750,10 @@ local bagProto = {
 addon.bagProto = bagProto
 
 function bagProto:OnEnable()
-	local open = false
 	for id in pairs(self.bagIds) do
-		local frame = GetContainerFrame(id)
-		if frame then
-			open = true
-			frame:Hide()
-		end
 		hookedBags[id] = self
 	end
+	local open = SetBlizzardBagsHidden(self.isBank, true)
 	if self.PostEnable then
 		self:PostEnable()
 	end
@@ -746,14 +764,11 @@ function bagProto:OnEnable()
 end
 
 function bagProto:OnDisable()
-	local open = self:IsOpen()
 	self:Close()
 	for id in pairs(self.bagIds) do
 		hookedBags[id] = nil
-		if open then
-			GetContainerFrame(id, true)
-		end
 	end
+	SetBlizzardBagsHidden(self.isBank, false)
 	if self.PostDisable then
 		self:PostDisable()
 	end
@@ -945,26 +960,25 @@ do
 	-- L["Bank"]
 	local bank = addon:NewBag("Bank", 20, addon.BAG_IDS.BANK, true, "AceHook-3.0")
 
-	local function NOOP() end
-
 	function bank:PostEnable()
 		self:RegisterMessage("AdiBags_InteractingWindowChanged")
 
+		BankFrame:UnregisterEvent("BANKFRAME_OPENED")
+		BankFrame:UnregisterEvent("BANKFRAME_CLOSED")
 		BankFrame:Hide()
 		if BankFrame:GetNumPoints() == 0 then
 			BankFrame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 0, -104)
 		end
-		self:RawHookScript(BankFrame, "OnEvent", NOOP, true)
-		self:RawHook(BankFrame, "Show", "Open", true)
-		self:RawHook(BankFrame, "Hide", "Close", true)
 		if addon:GetInteractingWindow() == "BANKFRAME" then
 			self:Open()
 		end
 	end
 
 	function bank:PostDisable()
+		BankFrame:RegisterEvent("BANKFRAME_OPENED")
+		BankFrame:RegisterEvent("BANKFRAME_CLOSED")
 		if addon:GetInteractingWindow() == "BANKFRAME" then
-			self.hooks[BankFrame].Show(BankFrame)
+			BankFrame:Show()
 		end
 	end
 
