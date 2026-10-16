@@ -68,16 +68,18 @@ do
 		local listWidget = frame.obj:GetUserData("listwidget")
 		if listWidget then
 			listWidget:Fire("OnEnter")
+			-- newer AceConfigDialog draws option tooltips in its own frame, not GameTooltip
+			local tooltip = LibStub("AceConfigDialog-3.0").tooltip or GameTooltip
 			if frame.obj.itemId then
 				local _, link = GetItemInfo(frame.obj.itemId)
 				if link then
-					GameTooltip:AddLine(link)
+					tooltip:AddLine(link)
 				end
-				GameTooltip:AddLine(L["Click or drag this item to remove it."], 1, 1, 1)
+				tooltip:AddLine(L["Click or drag this item to remove it."], 1, 1, 1)
 			else
-				GameTooltip:AddLine(L["Drop an item there to add it to the list."], 1, 1, 1)
+				tooltip:AddLine(L["Drop an item there to add it to the list."], 1, 1, 1)
 			end
-			GameTooltip:Show()
+			tooltip:Show()
 		end
 	end
 
