@@ -3,9 +3,23 @@ local L = addon.L
 
 --<GLOBALS
 local _G = _G
+local ClearCursor = _G.ClearCursor
+local CursorHasItem = _G.CursorHasItem
+local DeleteCursorItem = _G.DeleteCursorItem
+local format = _G.format
+local GetContainerItemID = _G.GetContainerItemID
+local GetContainerItemInfo = _G.GetContainerItemInfo
+local GetContainerItemLink = _G.GetContainerItemLink
+local GetContainerNumSlots = _G.GetContainerNumSlots
+local GetCursorInfo = _G.GetCursorInfo
 local GetItemInfo = _G.GetItemInfo
 local ITEM_QUALITY_POOR = _G.ITEM_QUALITY_POOR
 local ITEM_QUALITY_UNCOMMON = _G.ITEM_QUALITY_UNCOMMON
+local ipairs = _G.ipairs
+local NUM_BAG_SLOTS = _G.NUM_BAG_SLOTS
+local PickupContainerItem = _G.PickupContainerItem
+local print = _G.print
+local UseContainerItem = _G.UseContainerItem
 local select = _G.select
 local setmetatable = _G.setmetatable
 local tonumber = _G.tonumber
@@ -22,6 +36,7 @@ mod.uiDesc = L['Put items of poor quality or labeled as junk in the "Junk" secti
 local DEFAULTS = {
 	profile = {
 		sources = { ["*"] = true },
+		shiftClick = false,
 		include = {},
 		exclude = {
 			[6948] = true,
@@ -128,6 +143,54 @@ function mod:Update()
 	end
 end
 
+-- Shift+click on the "Vendor / Delete Grays" button of ElvUI_AddOnSkins
+
+function mod:GetIncludedSlots()
+	local slots = {}
+	for bag = 0, NUM_BAG_SLOTS do
+		for slot = 1, GetContainerNumSlots(bag) do
+			local itemId = GetContainerItemID(bag, slot)
+			if itemId and prefs.include[itemId] and select(3, GetItemInfo(itemId)) ~= ITEM_QUALITY_POOR then
+				slots[#slots + 1] = { bag = bag, slot = slot, itemId = itemId }
+			end
+		end
+	end
+	return slots
+end
+
+function mod:GetShiftClickHint()
+	if self:IsEnabled() and prefs.shiftClick then
+		return L["Shift+click"], format(L["Vendor / delete junk from the include list (%d)"], #self:GetIncludedSlots())
+	end
+end
+
+function mod:HandleShiftClick()
+	if not (self:IsEnabled() and prefs.shiftClick) or CursorHasItem() then
+		return false
+	end
+	local atMerchant = _G.MerchantFrame and _G.MerchantFrame:IsShown()
+	for _, s in ipairs(self:GetIncludedSlots()) do
+		local _, count, locked = GetContainerItemInfo(s.bag, s.slot)
+		local link = GetContainerItemLink(s.bag, s.slot)
+		if not locked and link then
+			if atMerchant and (select(11, GetItemInfo(s.itemId)) or 0) > 0 then
+				UseContainerItem(s.bag, s.slot)
+				print(format("|cffa335eeAdiBags|r: " .. L["sold %s x%d"], link, count))
+			else
+				PickupContainerItem(s.bag, s.slot)
+				local kind, cursorId = GetCursorInfo()
+				if kind == "item" and cursorId == s.itemId then
+					DeleteCursorItem()
+					print(format("|cffa335eeAdiBags|r: " .. L["deleted %s x%d"], link, count))
+				else
+					ClearCursor()
+				end
+			end
+		end
+	end
+	return true
+end
+
 -- Options
 
 local sourceList = {
@@ -161,6 +224,13 @@ function mod:GetOptions()
 			name = L["Included categories"],
 			values = sourceList,
 			order = 10,
+		},
+		shiftClick = {
+			type = "toggle",
+			name = L["Shift+click: vendor / delete items from the include list"],
+			desc = L["Items from the include list are vendored / deleted automatically."],
+			width = "full",
+			order = 15,
 		},
 		include = {
 			type = "multiselect",

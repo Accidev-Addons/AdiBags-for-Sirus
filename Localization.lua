@@ -480,6 +480,13 @@ L["Items in this list are always considered as junk. Click an item to remove it 
 	"Предметы из этого списка всегда считаются хламом. Кликните по предмету, чтобы убрать его из списка."
 L["Items in this list are never considered as junk. Click an item to remove it from the list."] =
 	"Предметы из этого списка никогда не считаются хламом. Кликните по предмету, чтобы убрать его из списка."
+L["Shift+click: vendor / delete items from the include list"] = "Shift+Клик - Продать/удалить предметы из списка включенных"
+L["Items from the include list are vendored / deleted automatically."] =
+	"Автоматически продаются/удаляются предметы из списка включенных."
+L["Shift+click"] = "Shift+клик"
+L["Vendor / delete junk from the include list (%d)"] = "Продать/удалить хлам из списка (%d)"
+L["sold %s x%d"] = "продано %s x%d"
+L["deleted %s x%d"] = "удалено %s x%d"
 -- widgets/Config-ItemList.lua
 L["Click or drag this item to remove it."] =
 	"Кликните или перетащите этот предмет, чтобы удалить его."
